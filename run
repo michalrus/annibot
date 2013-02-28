@@ -11,6 +11,8 @@ use Net::SMTP::SSL;
 use File::Basename;
 use Text::vCard::Addressbook;
 
+my $file_book = dirname($0) . "/book.vcf";
+
 # ------------------------- get
 
 my $cookie_jar = HTTP::Cookies->new(
@@ -80,15 +82,15 @@ die '-ERR(2)- ', $r->status_line
 die unless ($r->content =~ m/AuthToken....Value...([^"]+)/i);
 my $auth_token = $1;
 
-$r = $ua->get('https://mail.google.com/mail/c/data/export?exportType=ALL&out=VCARD&tok=' . $auth_token, ":content_file" => dirname(__FILE__) . "/book.vcf");
+$r = $ua->get('https://mail.google.com/mail/c/data/export?exportType=ALL&out=VCARD&tok=' . $auth_token, ":content_file" => $file_book);
 
 die '-ERR(3)- ', $r->status_line
 	unless $r->is_success;
 
 # ------------------------- parse & process
 
-my $address_book = Text::vCard::Addressbook->load( [ dirname(__FILE__) . "/book.vcf" ]);;
-unlink(dirname(__FILE__) . "/book.vcf");
+my $address_book = Text::vCard::Addressbook->load( [ $file_book ]);;
+unlink($file_book);
 #$address_book->import_data($r);
 
 my @events;
