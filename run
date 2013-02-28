@@ -190,7 +190,6 @@ else {
 	}
 }
 
-$smtp->datasend("-- \nAnnibot-0.21 \@ rt.michalrus.com\n");
 $smtp->dataend();
 
 $smtp->quit();
