@@ -1,0 +1,194 @@
+#! /usr/bin/perl
+
+use strict;
+use warnings;
+
+use LWP::UserAgent;
+use HTTP::Cookies;
+use JSON -support_by_pp;
+use Date::Calc;
+use Net::SMTP::SSL;
+use File::Basename;
+use Text::vCard::Addressbook;
+
+# ------------------------- get
+
+my $cookie_jar = HTTP::Cookies->new(
+	ignore_discard => 1,
+	hide_cookie2 => 1,
+	);
+
+my $ua = LWP::UserAgent->new;
+$ua->cookie_jar($cookie_jar);
+$ua->agent('Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/15.0.874.121 Safari/535.2');
+push @{ $ua->requests_redirectable }, 'POST';
+
+$ua->add_handler(request_prepare => sub {
+	my($request, $ua, $h) = @_;
+#	print $request->as_string(), "\n";
+});
+
+$ua->add_handler(response_header => sub {
+	my($response, $ua, $h) = @_;
+#	print $response->as_string(), "\n";
+});
+
+my $r = $ua->get('http://gmail.com/');
+
+my $start_time = time;
+
+die '-ERR(0)- ', $r->status_line
+	unless $r->is_success;
+
+my $dsh = '';
+my $galx = '';
+if ($r->content =~ m/name="dsh".*?value="([^"]+)/mis) {
+	$dsh = $1;
+}
+if ($r->content =~ m/name="GALX".*?value="([^"]+)/mis) {
+	$galx = $1;
+}
+
+$r = $ua->post('https://accounts.google.com/ServiceLoginAuth', [
+	'continue' => 'https://mail.google.com/mail/',
+	'service' => 'mail',
+	'rm' => 'false',
+	'dsh' => $dsh,
+	'ltmpl' => 'default',
+	'ltmpl' => 'default',
+	'scc' => '1',
+	'ss' => '1',
+	'GALX' => $galx,
+	'pstMsg' => '1',
+	'dnConn' => 'https://accounts.youtube.com',
+	'timeStmp' => '',
+	'secTok' => '',
+	'Email' => 'm@michalrus.com',
+	'Passwd' => '/m+Zed9Lm5//:jKFPUcS',
+	'signIn' => 'Sign in',
+	'rmShown' => '1'
+	]);
+
+die '-ERR(1)- ', $r->status_line
+	unless $r->is_success;
+
+$r = $ua->get('https://mail.google.com/mail/c/data/contactstore?ac=false&clid=gmail466144&ct=false&gp=false&hl=en&out=js&type=4&ud=true');
+
+die '-ERR(2)- ', $r->status_line
+	unless $r->is_success;
+
+die unless ($r->content =~ m/AuthToken....Value...([^"]+)/i);
+my $auth_token = $1;
+
+$r = $ua->get('https://mail.google.com/mail/c/data/export?exportType=ALL&out=VCARD&tok=' . $auth_token, ":content_file" => dirname(__FILE__) . "/book.vcf");
+
+die '-ERR(3)- ', $r->status_line
+	unless $r->is_success;
+
+# ------------------------- parse & process
+
+my $address_book = Text::vCard::Addressbook->load( [ dirname(__FILE__) . "/book.vcf" ]);;
+unlink(dirname(__FILE__) . "/book.vcf");
+#$address_book->import_data($r);
+
+my @events;
+
+sub annu {
+	my ($name, $type, $date) = @_;
+
+	if (!$date) { return; }
+
+	my ($dy, $dm, $dd); my ($ny, $nm, $nd); my $xy; my $delta; my $msg;
+
+	($ny, $nm, $nd) = Date::Calc::Today();
+	($dy, $dm, $dd) = split(/[\/\-]/, $date);
+	$xy = $ny;
+
+	while (1) {
+		$delta = Date::Calc::Delta_Days($ny, $nm, $nd, $xy, $dm, $dd);
+		if ($delta < 0) { $xy++; } else { last; }
+	}
+
+	if (!($#ARGV >= 0 && $ARGV[0] eq 'all') && $delta > 3 && !grep $_ == $delta, ( 7, 14, 21, 28 )) {
+		return;
+	}
+
+	if ($type eq 'birthday') {
+		$msg = $name . ' (born ' . Date::Calc::Date_to_Text($dy, $dm, $dd) . ') turns '	. ($xy - $dy);
+	} elsif ($type eq 'nameday') {
+		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' name day';
+	} elsif ($type eq 'wedding') {
+		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' wedding anniversary';
+	} else {
+		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' death anniversary';
+	}
+
+	$msg .= ' in ' . $delta . ' day' . ($delta == 1 ? '' : 's') . ' (on ' . Date::Calc::Date_to_Text_Long($xy, $dm, $dd) . ').';
+	$msg =~ s/0([0-9](st|nd|rd|th))/$1/ig;
+
+	return ( $delta, $msg );
+}
+
+foreach my $vcard ($address_book->vcards()) {
+	if ($vcard->bday()) {
+		my @msg = annu($vcard->fullname(), 'birthday', $vcard->bday());
+		push @events, [ @msg ] if (@msg);
+	}	
+	if ($vcard->note()) {
+		my $n = $vcard->note();
+		$n =~ s/\\n/\n/g;
+		$n =~ s/\\([,:;"])/$1/g;
+		$n =~ s/\\\\/\\/g;
+		$n =~ s/\n/\0/g;
+		$n =~ s/\s//g;
+		$n =~ s/\0/\n/g;
+		if ($n =~ m/name-*day:*([0-9\-\/]+)/i) {
+			my @msg = annu($vcard->fullname(), 'nameday', $1);
+			push @events, [ @msg ] if (@msg);
+		}
+		if ($n =~ m/wedding:*([0-9\-\/]+)/i) {
+			my @msg = annu($vcard->fullname(), 'wedding', $1);
+			push @events, [ @msg ] if (@msg);
+		}
+		if ($n =~ m/death:*([0-9\-\/]+)/i) {
+			my @msg = annu($vcard->fullname(), 'death', $1);
+			push @events, [ @msg ] if (@msg);
+		}
+	}
+}
+
+@events = sort { $a->[0] <=> $b->[0] } @events;
+
+# ------------------------- mail
+
+my $smtp = Net::SMTP::SSL->new('smtp.gmail.com', Port => 465, Timeout => 30, Hello => 'michalrus.com', Debug => 0)
+	or die "-ERR(3)- could not connect to server; $!";
+
+$smtp->auth ('scripts@michalrus.com', 'yCK;*&b1.4rHVfW7zWc#')
+	or die "-ERR(4)- could not authenticate; $!";
+$smtp->mail('scripts@michalrus.com');
+$smtp->to('m@michalrus.com');
+
+$smtp->data();
+
+$smtp->datasend('Subject: Anniversary reminder.' . "\n");
+$smtp->datasend('To: =?UTF-8?Q?Micha=C5=82_Rus?= <m@michalrus.com>' . "\n");
+$smtp->datasend('From: Annibot-0.19 <scripts@michalrus.com>' . "\n");
+$smtp->datasend('Content-Type: text/plain; charset=UTF-8; format=flowed' . "\n");
+$smtp->datasend('Content-Transfer-Encoding: 8bit' . "\n");
+$smtp->datasend('MIME-Version: 1.0' . "\n");
+$smtp->datasend("\n\n");
+
+if ($#events < 0) {
+	$smtp->datasend("[empty]\n\n");
+}
+else {
+	for (my $i = 0; $i <= $#events; $i++) {
+		$smtp->datasend($events[$i][1] . "\n\n");
+	}
+}
+
+$smtp->datasend("-- \nAnnibot-0.21 \@ rt.michalrus.com\n");
+$smtp->dataend();
+
+$smtp->quit();
