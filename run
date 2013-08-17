@@ -1,5 +1,21 @@
 #! /usr/bin/perl
 
+#
+#   Copyright 2013 Michał Rus <m@michalrus.com>
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+
 use strict;
 use warnings;
 
@@ -12,6 +28,52 @@ use File::Basename;
 use Text::vCard::Addressbook;
 
 my $file_book = dirname($0) . "/book.vcf";
+
+# ------------------------- config
+
+my %cfg = ();
+
+my %cfg_fields = map { $_ => 1 } ('ContactsEmail', 'ContactsPassword', 'MailTo', 'GmailFromName', 'GmailFromEmail', 'GmailPassword');
+
+my $cfg_file = dirname($0) . '/config.cfg';
+
+unless (open FP, '<', $cfg_file) {
+	print $cfg_file . ": " . $! . "\n\nPlease, copy config.cfg.sample to config.cfg\nand modify it to suit your needs.\n";
+	exit;
+};
+
+my $line_num = 0;
+while (my $line = <FP>) {
+	$line_num++;
+	chomp $line;
+	if ($line =~ m/^\s*(#.*)?$/) {
+		next;
+	}
+	elsif ($line =~ m/^\s*([a-z]+)\s+"(.*?)"\s*?$/i) {
+		my $key = $1;
+		my $val = $2;
+
+		unless (exists($cfg_fields{$key})) {
+			print $cfg_file . ': unknown key `' . $key . '\' on line ' . $line_num . ":\n\n    " . $line . "\n\n";
+			exit;
+		}
+
+		$cfg{$key} = $val;
+	}
+	else {
+		print $cfg_file . ': WTF on line ' . $line_num . ":\n\n    " . $line . "\n\n";
+		exit;
+	}
+}
+
+close FP;
+
+for my $key (keys %cfg_fields) {
+	unless (exists($cfg{$key})) {
+		print $cfg_file . ': required key `' . $key . "\' not found\n";
+		exit;
+	}
+}
 
 # ------------------------- get
 
@@ -65,8 +127,8 @@ $r = $ua->post('https://accounts.google.com/ServiceLoginAuth', [
 	'dnConn' => 'https://accounts.youtube.com',
 	'timeStmp' => '',
 	'secTok' => '',
-	'Email' => 'm@michalrus.com',
-	'Passwd' => '/m+Zed9Lm5//:jKFPUcS',
+	'Email' => $cfg{'ContactsEmail'},
+	'Passwd' => $cfg{'ContactsPassword'},
 	'signIn' => 'Sign in',
 	'rmShown' => '1'
 	]);
@@ -89,7 +151,7 @@ die '-ERR(3)- ', $r->status_line
 
 # ------------------------- parse & process
 
-my $address_book = Text::vCard::Addressbook->load( [ $file_book ]);;
+my $address_book = Text::vCard::Addressbook->load([ $file_book ]);
 unlink($file_book);
 #$address_book->import_data($r);
 
@@ -163,26 +225,37 @@ foreach my $vcard ($address_book->vcards()) {
 
 # ------------------------- mail
 
-my $smtp = Net::SMTP::SSL->new('smtp.gmail.com', Port => 465, Timeout => 30, Hello => 'michalrus.com', Debug => 0)
-	or die "-ERR(3)- could not connect to server; $!";
+my $smtp;
 
-$smtp->auth ('scripts@michalrus.com', 'yCK;*&b1.4rHVfW7zWc#')
+{
+	local $main::SIG{__WARN__} = sub {
+		my $warn = $_[0];
+		unless ($warn =~ m/default of SSL_verify_mode of SSL_VERIFY_NONE/) {
+			warn $warn;
+		}
+	};
+
+	$smtp = Net::SMTP::SSL->new('smtp.gmail.com', Port => 465, Timeout => 30, Hello => 'annibot', Debug => 0)
+		or die "-ERR(3)- could not connect to server; $!";
+}
+
+$smtp->auth ($cfg{'GmailFromEmail'}, $cfg{'GmailPassword'})
 	or die "-ERR(4)- could not authenticate; $!";
-$smtp->mail('scripts@michalrus.com');
-$smtp->to('m@michalrus.com');
+$smtp->mail($cfg{'GmailFromEmail'});
+$smtp->to($cfg{'MailTo'});
 
 $smtp->data();
 
 $smtp->datasend('Subject: Upcoming anniversaries.' . "\n");
-$smtp->datasend('To: =?UTF-8?Q?Micha=C5=82_Rus?= <m@michalrus.com>' . "\n");
-$smtp->datasend('From: annibot <scripts@michalrus.com>' . "\n");
+$smtp->datasend('To: ' . $cfg{'MailTo'} . "\n");
+$smtp->datasend('From: ' . $cfg{'GmailFromName'} . ' <' . $cfg{'GmailFromEmail'} . '>' . "\n");
 $smtp->datasend('Content-Type: text/plain; charset=UTF-8; format=flowed' . "\n");
 $smtp->datasend('Content-Transfer-Encoding: 8bit' . "\n");
 $smtp->datasend('MIME-Version: 1.0' . "\n");
 $smtp->datasend("\n\n");
 
 if ($#events < 0) {
-	$smtp->datasend("[empty]\n\n");
+	$smtp->datasend("[none]\n\n");
 }
 else {
 	for (my $i = 0; $i <= $#events; $i++) {
