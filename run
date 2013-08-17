@@ -179,12 +179,14 @@ sub annu {
 
 	if ($type eq 'birthday') {
 		$msg = $name . ' (born ' . Date::Calc::Date_to_Text($dy, $dm, $dd) . ') turns '	. ($xy - $dy);
-	} elsif ($type eq 'nameday') {
+	} elsif ($type =~ /name-*day/i) {
 		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' name day';
-	} elsif ($type eq 'wedding') {
+	} elsif ($type =~ /wedding|anniversary/i) {
 		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' wedding anniversary';
-	} else {
+	} elsif ($type =~ /death/i) {
 		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' death anniversary';
+	} else {
+		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' ' . $type;
 	}
 
 	$msg .= ' in ' . $delta . ' day' . ($delta == 1 ? '' : 's') . ' (on ' . Date::Calc::Date_to_Text_Long($xy, $dm, $dd) . ').';
@@ -198,6 +200,7 @@ foreach my $vcard ($address_book->vcards()) {
 		my @msg = annu($vcard->fullname(), 'birthday', $vcard->bday());
 		push @events, [ @msg ] if (@msg);
 	}	
+
 	if ($vcard->note()) {
 		my $n = $vcard->note();
 		$n =~ s/\\n/\n/g;
@@ -206,16 +209,28 @@ foreach my $vcard ($address_book->vcards()) {
 		$n =~ s/\n/\0/g;
 		$n =~ s/\s//g;
 		$n =~ s/\0/\n/g;
-		if ($n =~ m/name-*day:*([0-9\-\/]+)/i) {
-			my @msg = annu($vcard->fullname(), 'nameday', $1);
+
+		while ($n =~ m/(name-*day|wedding|death):*([0-9\-\/]+)/gi) {
+			my @msg = annu($vcard->fullname(), $1, $2);
 			push @events, [ @msg ] if (@msg);
 		}
-		if ($n =~ m/wedding:*([0-9\-\/]+)/i) {
-			my @msg = annu($vcard->fullname(), 'wedding', $1);
-			push @events, [ @msg ] if (@msg);
-		}
-		if ($n =~ m/death:*([0-9\-\/]+)/i) {
-			my @msg = annu($vcard->fullname(), 'death', $1);
+	}
+
+	my $dates = $vcard->get('X-ABDATE');
+	if (defined $dates) {
+		foreach my $date (@{ $dates }) {
+			my $group = $date->group();
+			my $value = $date->value();
+
+			my $label = $vcard->get_group($group, 'X-ABLabel');
+			if (defined $label) {
+				$label = $label->[0]->value();
+			}
+			else {
+				$label = '';
+			}
+
+			my @msg = annu($vcard->fullname(), $label, $value);
 			push @events, [ @msg ] if (@msg);
 		}
 	}
