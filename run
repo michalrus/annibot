@@ -191,7 +191,8 @@ sub annu {
 	if ($type eq 'birthday') {
 		$msg = $name . ' (born ' . Date::Calc::Date_to_Text($dy, $dm, $dd) . ') turns '	. ($xy - $dy);
 	} elsif ($handling_nameday) {
-		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' name day';
+		my $num = $xy - $dy + 1; # +1, because name day is not an anniversary!!! 1st after your birth date is 1st, not 0th
+		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($num) . ' name day';
 	} elsif ($type =~ /wedding|anniversary/i) {
 		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' wedding anniversary';
 	} elsif ($type =~ /death/i) {
