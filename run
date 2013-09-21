@@ -158,16 +158,26 @@ unlink($file_book);
 my @events;
 
 sub annu {
-	my ($name, $type, $date) = @_;
+	my ($name, $type, $date, $bday) = @_;
 
 	if (!$date) { return; }
 
-	my ($dy, $dm, $dd); my ($ny, $nm, $nd); my $xy; my $delta; my $msg;
+	my ($ny, $nm, $nd) = Date::Calc::Today();
+	my ($dy, $dm, $dd) = split(/[\/\-]/, $date);
+	my $xy = $ny;
 
-	($ny, $nm, $nd) = Date::Calc::Today();
-	($dy, $dm, $dd) = split(/[\/\-]/, $date);
-	$xy = $ny;
+	# first nameday is always *after* birth date -- a special case of anniversary; disregard nameday's year!
+	my $handling_nameday = ($type =~ /name[\- ]*day/i ? 1 : 0);
+	if ($handling_nameday && defined $bday) {
+		my ($by, $bm, $bd) = split(/[\/\-]/, $bday);
+		$dy = $by;
+		# if nameday is *before* bday (considering month and day only), increment $dy
+		if (Date::Calc::Delta_Days($by, $dm, $dd, $by, $bm, $bd) > 0) {
+			$dy++;
+		}
+	}
 
+	my $delta;
 	while (1) {
 		$delta = Date::Calc::Delta_Days($ny, $nm, $nd, $xy, $dm, $dd);
 		if ($delta < 0) { $xy++; } else { last; }
@@ -177,9 +187,10 @@ sub annu {
 		return;
 	}
 
+	my $msg;
 	if ($type eq 'birthday') {
 		$msg = $name . ' (born ' . Date::Calc::Date_to_Text($dy, $dm, $dd) . ') turns '	. ($xy - $dy);
-	} elsif ($type =~ /name-*day/i) {
+	} elsif ($handling_nameday) {
 		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' name day';
 	} elsif ($type =~ /wedding|anniversary/i) {
 		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' wedding anniversary';
@@ -196,8 +207,11 @@ sub annu {
 }
 
 foreach my $vcard ($address_book->vcards()) {
+	my $bday;
+
 	if ($vcard->bday()) {
-		my @msg = annu($vcard->fullname(), 'birthday', $vcard->bday());
+		$bday = $vcard->bday();
+		my @msg = annu($vcard->fullname(), 'birthday', $vcard->bday(), $bday);
 		push @events, [ @msg ] if (@msg);
 	}	
 
@@ -211,7 +225,7 @@ foreach my $vcard ($address_book->vcards()) {
 		$n =~ s/\0/\n/g;
 
 		while ($n =~ m/(name-*day|wedding|death):*([0-9\-\/]+)/gi) {
-			my @msg = annu($vcard->fullname(), $1, $2);
+			my @msg = annu($vcard->fullname(), $1, $2, $bday);
 			push @events, [ @msg ] if (@msg);
 		}
 	}
@@ -230,7 +244,7 @@ foreach my $vcard ($address_book->vcards()) {
 				$label = '';
 			}
 
-			my @msg = annu($vcard->fullname(), $label, $value);
+			my @msg = annu($vcard->fullname(), $label, $value, $bday);
 			push @events, [ @msg ] if (@msg);
 		}
 	}
