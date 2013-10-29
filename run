@@ -141,7 +141,8 @@ $r = $ua->get('https://mail.google.com/mail/c/data/contactstore?ac=false&clid=gm
 die '-ERR(2)- ', $r->status_line
 	unless $r->is_success;
 
-die unless ($r->content =~ m/AuthToken....Value...([^"]+)/i);
+die '-ERR(2.1) no AuthToken/Value in Google response'
+	unless ($r->content =~ m/AuthToken....Value...([^"]+)/i);
 my $auth_token = $1;
 
 $r = $ua->get('https://mail.google.com/mail/c/data/export?exportType=ALL&out=VCARD&tok=' . $auth_token, ":content_file" => $file_book);
