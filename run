@@ -21,11 +21,15 @@ use warnings;
 
 use LWP::UserAgent;
 use HTTP::Cookies;
+use HTML::Entities qw(decode_entities);
 use JSON -support_by_pp;
 use Date::Calc;
 use Net::SMTP::SSL;
 use File::Basename;
 use Text::vCard::Addressbook;
+
+use utf8;
+use open ':std', ':encoding(UTF-8)';
 
 my $file_book = dirname($0) . "/book.vcf";
 
@@ -87,49 +91,27 @@ $ua->cookie_jar($cookie_jar);
 $ua->agent('Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/15.0.874.121 Safari/535.2');
 push @{ $ua->requests_redirectable }, 'POST';
 
-$ua->add_handler(request_prepare => sub {
-	my($request, $ua, $h) = @_;
-#	print $request->as_string(), "\n";
-});
+my $r = $ua->get('https://accounts.google.com/ServiceLogin?service=mail&continue=https://mail.google.com/mail/');
 
-$ua->add_handler(response_header => sub {
-	my($response, $ua, $h) = @_;
-#	print $response->as_string(), "\n";
-});
+die '-ERR(0)- Connection failed', $r->status_line unless $r->is_success;
 
-my $r = $ua->get('http://gmail.com/');
-
-my $start_time = time;
-
-die '-ERR(0)- ', $r->status_line
-	unless $r->is_success;
-
-my $dsh = '';
-my $galx = '';
-if ($r->content =~ m/name="dsh".*?value="([^"]+)/mis) {
-	$dsh = $1;
-}
-if ($r->content =~ m/name="GALX".*?value="([^"]+)/mis) {
-	$galx = $1;
-}
+die '-ERR(0)- No GALX postparam' unless ($r->content =~ m/name="GALX".*?value="([^"]+)/mis);
+my $galx = $1;
 
 $r = $ua->post('https://accounts.google.com/ServiceLoginAuth', [
+	'GALX' => $galx,
 	'continue' => 'https://mail.google.com/mail/',
 	'service' => 'mail',
-	'rm' => 'false',
-	'dsh' => $dsh,
-	'ltmpl' => 'default',
-	'ltmpl' => 'default',
-	'scc' => '1',
-	'ss' => '1',
-	'GALX' => $galx,
-	'pstMsg' => '1',
-	'dnConn' => 'https://accounts.youtube.com',
-	'timeStmp' => '',
-	'secTok' => '',
+	'_utf8' => decode_entities('&#9731;'),
+	'bgresponse' => 'js_disabled',
+	'pstMsg' => '0',
+	'dnConn' => '',
+	'checkConnection' => '',
+	'checkedDomains' => 'youtube',
 	'Email' => $cfg{'ContactsEmail'},
 	'Passwd' => $cfg{'ContactsPassword'},
 	'signIn' => 'Sign in',
+#	'PersistentCookie' => 'yes',
 	'rmShown' => '1'
 	]);
 
@@ -141,8 +123,7 @@ $r = $ua->get('https://mail.google.com/mail/c/data/contactstore?ac=false&clid=gm
 die '-ERR(2)- ', $r->status_line
 	unless $r->is_success;
 
-die '-ERR(2.1) no AuthToken/Value in Google response'
-	unless ($r->content =~ m/AuthToken....Value...([^"]+)/i);
+die '-ERR(2.1) no AuthToken in Google response' unless ($r->content =~ m/"AuthToken":{"Value":"([^"]+)/i);
 my $auth_token = $1;
 
 $r = $ua->get('https://mail.google.com/mail/c/data/export?exportType=ALL&out=VCARD&tok=' . $auth_token, ":content_file" => $file_book);
