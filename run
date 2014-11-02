@@ -19,25 +19,20 @@
 use strict;
 use warnings;
 
-use LWP::UserAgent;
-use HTTP::Cookies;
-use HTML::Entities qw(decode_entities);
-use JSON -support_by_pp;
 use Date::Calc;
 use Net::SMTP::SSL;
 use File::Basename;
-use Text::vCard::Addressbook;
+use XML::Simple qw(:strict);
+use Data::Dumper;
 
 use utf8;
 use open ':std', ':encoding(UTF-8)';
-
-my $file_book = dirname($0) . "/book.vcf";
 
 # ------------------------- config
 
 my %cfg = ();
 
-my %cfg_fields = map { $_ => 1 } ('ContactsEmail', 'ContactsPassword', 'MailTo', 'GmailFromName', 'GmailFromEmail', 'GmailPassword');
+my %cfg_fields = map { $_ => 1 } ('MailTo', 'GmailFromName', 'GmailFromEmail', 'GmailPassword');
 
 my $cfg_file = dirname($0) . '/config.cfg';
 
@@ -81,68 +76,20 @@ for my $key (keys %cfg_fields) {
 
 # ------------------------- get
 
-my $cookie_jar = HTTP::Cookies->new(
-	ignore_discard => 1,
-	hide_cookie2 => 1,
-	);
+system(dirname($0) . '/get-all 2>&1');
 
-my $ua = LWP::UserAgent->new;
-$ua->cookie_jar($cookie_jar);
-$ua->agent('Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/15.0.874.121 Safari/535.2');
-push @{ $ua->requests_redirectable }, 'POST';
-
-my $r = $ua->get('https://accounts.google.com/ServiceLogin?service=mail&continue=https://mail.google.com/mail/');
-
-die '-ERR(0)- Connection failed', $r->status_line unless $r->is_success;
-
-die '-ERR(0)- No GALX postparam' unless ($r->content =~ m/name="GALX".*?value="([^"]+)/mis);
-my $galx = $1;
-
-$r = $ua->post('https://accounts.google.com/ServiceLoginAuth', [
-	'GALX' => $galx,
-	'continue' => 'https://mail.google.com/mail/',
-	'service' => 'mail',
-	'_utf8' => decode_entities('&#9731;'),
-	'bgresponse' => 'js_disabled',
-	'pstMsg' => '0',
-	'dnConn' => '',
-	'checkConnection' => '',
-	'checkedDomains' => 'youtube',
-	'Email' => $cfg{'ContactsEmail'},
-	'Passwd' => $cfg{'ContactsPassword'},
-	'signIn' => 'Sign in',
-#	'PersistentCookie' => 'yes',
-	'rmShown' => '1'
-	]);
-
-die '-ERR(1)- ', $r->status_line
-	unless $r->is_success;
-
-$r = $ua->get('https://mail.google.com/mail/c/data/contactstore?ac=false&clid=gmail466144&ct=false&gp=false&hl=en&out=js&type=4&ud=true');
-
-die '-ERR(2)- ', $r->status_line
-	unless $r->is_success;
-
-die '-ERR(2.1) no AuthToken in Google response' unless ($r->content =~ m/"AuthToken":{"Value":"([^"]+)/i);
-my $auth_token = $1;
-
-$r = $ua->get('https://mail.google.com/mail/c/data/export?exportType=ALL&out=VCARD&tok=' . $auth_token, ":content_file" => $file_book);
-
-die '-ERR(3)- ', $r->status_line
-	unless $r->is_success;
+if ($? != 0) {
+  print "./get-all failed; continuing with local all.xml\n\n";
+}
 
 # ------------------------- parse & process
-
-my $address_book = Text::vCard::Addressbook->load([ $file_book ]);
-unlink($file_book);
-#$address_book->import_data($r);
 
 my @events;
 
 sub annu {
 	my ($name, $type, $date, $bday) = @_;
 
-	if (!$date) { return; }
+	return unless $date;
 
 	my ($ny, $nm, $nd) = Date::Calc::Today();
 	my ($dy, $dm, $dd) = split(/[\/\-]/, $date);
@@ -189,48 +136,42 @@ sub annu {
 	return ( $delta, $msg );
 }
 
-foreach my $vcard ($address_book->vcards()) {
-	my $bday;
-
-	if ($vcard->bday()) {
-		$bday = $vcard->bday();
-		my @msg = annu($vcard->fullname(), 'birthday', $vcard->bday(), $bday);
-		push @events, [ @msg ] if (@msg);
-	}	
-
-	if ($vcard->note()) {
-		my $n = $vcard->note();
-		$n =~ s/\\n/\n/g;
-		$n =~ s/\\([,:;"])/$1/g;
-		$n =~ s/\\\\/\\/g;
-		$n =~ s/\n/\0/g;
-		$n =~ s/\s//g;
-		$n =~ s/\0/\n/g;
-
-		while ($n =~ m/(name-*day|wedding|death):*([0-9\-\/]+)/gi) {
-			my @msg = annu($vcard->fullname(), $1, $2, $bday);
-			push @events, [ @msg ] if (@msg);
-		}
+sub sanitize_date {
+	my ($in) = @_;
+	my ($y, $m, $d) = [0, 0, 0];
+	if ($in =~ /^(\d+|-)-(\d+|-)-(\d+|-)$/) {
+		$y = $1;
+		$m = $2;
+		$d = $3;
 	}
+	$y = 1800 if ($y eq '-');
+	$m = 1 if ($m eq '-');
+	$d = 1 if ($d eq '-');
+	return "$y-$m-$d";
+}
 
-	my $dates = $vcard->get('X-ABDATE');
-	if (defined $dates) {
-		foreach my $date (@{ $dates }) {
-			my $group = $date->group();
-			my $value = $date->value();
+my $all = XMLin(dirname($0) . '/all.xml', KeyAttr => { }, ForceArray => [ 'entry', 'gContact:event' ]);
 
-			my $label = $vcard->get_group($group, 'X-ABLabel');
-			if (defined $label) {
-				$label = $label->[0]->value();
-			}
-			else {
-				$label = '';
-			}
+foreach my $entry (@{$all->{'entry'}}) {
+  my $bday;
+  my $name = $entry->{'title'};
 
-			my @msg = annu($vcard->fullname(), $label, $value, $bday);
-			push @events, [ @msg ] if (@msg);
-		}
-	}
+  if (defined $entry->{'gContact:birthday'}) {
+    $bday = sanitize_date($entry->{'gContact:birthday'}->{'when'});
+    my @msg = annu($name, 'birthday', $bday, $bday);
+    push @events, [ @msg ] if (@msg);
+  }
+
+  if (defined $entry->{'gContact:event'}) {
+    foreach my $event (@{$entry->{'gContact:event'}}) {
+      my $label = '';
+      $label = $event->{'label'} if (defined $event->{'label'});
+      $label = $event->{'rel'} if (defined $event->{'rel'});
+      my $value = sanitize_date($event->{'gd:when'}->{'startTime'});
+      my @msg = annu($name, $label, $value, $bday);
+      push @events, [ @msg ] if (@msg);
+    }
+  }
 }
 
 @events = sort { $a->[0] <=> $b->[0] } @events;
