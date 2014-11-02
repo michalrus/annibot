@@ -36,7 +36,7 @@ if [ -e "$f_token_access" ] ; then
   eecho -n 'Refreshing the access token on Google OAuth2... ' >&2
   refresh_token="$(cat "$f_token_refresh")"
 
-  json=$(curl -sd "client_id=${client_id}&client_secret=${client_secret}&refresh_token=${refresh_token}&grant_type=refresh_token" 'https://accounts.google.com/o/oauth2/token') || die "curl"
+  json=$(curl -sSfLd "client_id=${client_id}&client_secret=${client_secret}&refresh_token=${refresh_token}&grant_type=refresh_token" 'https://accounts.google.com/o/oauth2/token') || die "curl"
 
   error=$(echo "$json" | grep -E '"error"' | sed -re 's/^.*:\s*"([^"]+).*$/\1/g')
   if [ -n "$error" ] ; then
@@ -64,7 +64,7 @@ fi
 
 eecho -n 'Requesting new tokens from Google OAuth2... ' >&2
 
-json=$(curl -sd "client_id=${client_id}&scope=${scope}" 'https://accounts.google.com/o/oauth2/device/code') || die "curl"
+json=$(curl -sSfLd "client_id=${client_id}&scope=${scope}" 'https://accounts.google.com/o/oauth2/device/code') || die "curl"
 
 error=$(echo "$json" | grep -E '"error"' | sed -re 's/^.*:\s*"([^"]+).*$/\1/g')
 if [ -n "$error" ] ; then
@@ -88,7 +88,7 @@ eecho
 while true ; do
   eecho -n "Polling for the access token... "
 
-  json=$(curl -sd "client_id=${client_id}&client_secret=${client_secret}&code=${device_code}&grant_type=http://oauth.net/grant_type/device/1.0" 'https://accounts.google.com/o/oauth2/token') || die "curl"
+  json=$(curl -sSfLd "client_id=${client_id}&client_secret=${client_secret}&code=${device_code}&grant_type=http://oauth.net/grant_type/device/1.0" 'https://accounts.google.com/o/oauth2/token') || die "curl"
   error=$(echo "$json" | grep -E '"error"' | sed -re 's/^.*:\s*"([^"]+).*$/\1/g')
 
   if [ -z "$error" ] ; then
