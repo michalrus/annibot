@@ -17,6 +17,7 @@
 /*
 !/run
 !/login
+!/get-all
 !/config.cfg.sample
 !/README.md
 !/LICENSE
