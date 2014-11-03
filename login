@@ -53,7 +53,8 @@ if [ -e "$f_token_access" ] ; then
   expires_in=$(      echo "$json" | grep -E '"expires_in"'       | sed -re 's/^.*:\s*([0-9]+).*$/\1/g')
 
   expires_on=$(echo "$(date '+%s')+${expires_in}-10" | bc)
-  echo -ne "${expires_on}\n${access_token}\n" >"$f_token_access"
+  echo "${expires_on}
+${access_token}" >"$f_token_access"
 
   echo "$access_token"
 
@@ -99,8 +100,9 @@ while true ; do
     expires_in=$(      echo "$json" | grep -E '"expires_in"'       | sed -re 's/^.*:\s*([0-9]+).*$/\1/g')
 
     expires_on=$(echo "$(date '+%s')+${expires_in}-10" | bc)
-    echo -ne "${expires_on}\n${access_token}\n" >"$f_token_access"
-    echo -ne "${refresh_token}\n" >"$f_token_refresh"
+    echo "${expires_on}
+${access_token}" >"$f_token_access"
+    echo "${refresh_token}" >"$f_token_refresh"
 
     echo "$access_token"
 
