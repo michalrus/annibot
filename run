@@ -201,7 +201,7 @@ my $smtp;
 }
 
 $smtp->auth ($cfg{'GmailFromEmail'}, $cfg{'GmailPassword'})
-	or die "-ERR(4)- could not authenticate; $!";
+	or die "-ERR(4)- could not authenticate; " . $smtp->message;
 $smtp->mail($cfg{'GmailFromEmail'});
 $smtp->to($cfg{'MailTo'});
 
