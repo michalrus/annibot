@@ -95,53 +95,74 @@ if ($? != 0) {
 my @events;
 
 sub annu {
-	my ($name, $type, $date, $bday) = @_;
+	my ($name, $dates) = @_;
+	return unless %$dates;
 
-	return unless $date;
+	my $dead = 0;
+	for my $key (keys %$dates) {
+		$dead = 1 if $key =~ m/death|dead/i;
+	}
+
+	my $bday;
+	$bday = sanitize_date($dates->{'birthday'}) if defined $dates->{'birthday'};
 
 	my ($ny, $nm, $nd) = Date::Calc::Today();
-	my ($dy, $dm, $dd) = split(/[\/\-]/, $date);
-	my $xy = $ny;
 
-	# first nameday is always *after* birth date -- a special case of anniversary; disregard nameday's year!
-	my $handling_nameday = ($type =~ /name[\- ]*day/i ? 1 : 0);
-	if ($handling_nameday && defined $bday) {
-		my ($by, $bm, $bd) = split(/[\/\-]/, $bday);
-		$dy = $by;
-		# if nameday is *before* bday (considering month and day only), increment $dy
-		if (Date::Calc::Delta_Days($by, $dm, $dd, $by, $bm, $bd) > 0) {
-			$dy++;
+	for my $type (keys %$dates) {
+		my $date = $dates->{$type};
+
+		my ($dy, $dm, $dd) = split(/[\/\-]/, sanitize_date($date));
+		my $xy = $ny;
+
+		# first nameday is always *after* birth date -- a special case of anniversary; disregard nameday's year!
+		my $handling_nameday = ($type =~ /name[\- ]*day/i ? 1 : 0);
+		if ($handling_nameday && defined $bday) {
+			my ($by, $bm, $bd) = split(/[\/\-]/, $bday);
+			$dy = $by;
+			# if nameday is *before* bday (considering month and day only), increment $dy
+			if (Date::Calc::Delta_Days($by, $dm, $dd, $by, $bm, $bd) > 0) {
+				$dy++;
+			}
 		}
+
+		my $delta;
+		while (1) {
+			$delta = Date::Calc::Delta_Days($ny, $nm, $nd, $xy, $dm, $dd);
+			if ($delta < 0) { $xy++; } else { last; }
+		}
+
+		if (!($#ARGV >= 0 && $ARGV[0] eq 'all') && $delta > 3 && !grep $_ == $delta, ( 7, 14, 21, 28 )) {
+			next;
+		}
+
+		my $handling_death = ($type =~ /death|dead/i ? 1 : 0);
+
+		my $turns = ' turns ';
+		my $celebrates = ' celebrates ';
+		if ($dead && !$handling_death) {
+			$turns = ' would turn ';
+			$celebrates = ' would celebrate ';
+		}
+
+		my $msg;
+		if ($type eq 'birthday') {
+			$msg = $name . ' (born ' . Date::Calc::Date_to_Text($dy, $dm, $dd) . ')' . $turns . ($xy - $dy);
+		} elsif ($handling_nameday) {
+			my $num = $xy - $dy + 1; # +1, because name day is not an anniversary!!! 1st after your birth date is 1st, not 0th
+			$msg = $name . $celebrates . Date::Calc::English_Ordinal($num) . ' name day';
+		} elsif ($handling_death) {
+			$msg = $name . $celebrates . Date::Calc::English_Ordinal($xy - $dy) . ' death anniversary';
+		} elsif ($type =~ /wedding|anniversary/i) {
+			$msg = $name . $celebrates . Date::Calc::English_Ordinal($xy - $dy) . ' wedding anniversary';
+		} else {
+			$msg = $name . $celebrates . Date::Calc::English_Ordinal($xy - $dy) . ' ' . $type;
+		}
+
+		$msg .= ' in ' . $delta . ' day' . ($delta == 1 ? '' : 's') . ' (on ' . Date::Calc::Date_to_Text_Long($xy, $dm, $dd) . ').';
+		$msg =~ s/0([0-9](st|nd|rd|th))/$1/ig;
+
+		push @events, [ ( $delta, $msg ) ];
 	}
-
-	my $delta;
-	while (1) {
-		$delta = Date::Calc::Delta_Days($ny, $nm, $nd, $xy, $dm, $dd);
-		if ($delta < 0) { $xy++; } else { last; }
-	}
-
-	if (!($#ARGV >= 0 && $ARGV[0] eq 'all') && $delta > 3 && !grep $_ == $delta, ( 7, 14, 21, 28 )) {
-		return;
-	}
-
-	my $msg;
-	if ($type eq 'birthday') {
-		$msg = $name . ' (born ' . Date::Calc::Date_to_Text($dy, $dm, $dd) . ') turns '	. ($xy - $dy);
-	} elsif ($handling_nameday) {
-		my $num = $xy - $dy + 1; # +1, because name day is not an anniversary!!! 1st after your birth date is 1st, not 0th
-		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($num) . ' name day';
-	} elsif ($type =~ /wedding|anniversary/i) {
-		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' wedding anniversary';
-	} elsif ($type =~ /death/i) {
-		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' death anniversary';
-	} else {
-		$msg = $name . ' celebrates ' . Date::Calc::English_Ordinal($xy - $dy) . ' ' . $type;
-	}
-
-	$msg .= ' in ' . $delta . ' day' . ($delta == 1 ? '' : 's') . ' (on ' . Date::Calc::Date_to_Text_Long($xy, $dm, $dd) . ').';
-	$msg =~ s/0([0-9](st|nd|rd|th))/$1/ig;
-
-	return ( $delta, $msg );
 }
 
 sub sanitize_date {
@@ -164,10 +185,11 @@ foreach my $entry (@{$all->{'entry'}}) {
   my $bday;
   my $name = $entry->{'title'};
 
+  my $dates = {};
+
   if (defined $entry->{'gContact:birthday'}) {
-    $bday = sanitize_date($entry->{'gContact:birthday'}->{'when'});
-    my @msg = annu($name, 'birthday', $bday, $bday);
-    push @events, [ @msg ] if (@msg);
+    $bday = $entry->{'gContact:birthday'}->{'when'};
+    $dates->{'birthday'} = $bday;
   }
 
   if (defined $entry->{'gContact:event'}) {
@@ -175,11 +197,12 @@ foreach my $entry (@{$all->{'entry'}}) {
       my $label = '';
       $label = $event->{'label'} if (defined $event->{'label'});
       $label = $event->{'rel'} if (defined $event->{'rel'});
-      my $value = sanitize_date($event->{'gd:when'}->{'startTime'});
-      my @msg = annu($name, $label, $value, $bday);
-      push @events, [ @msg ] if (@msg);
+      my $value = $event->{'gd:when'}->{'startTime'};
+      $dates->{$label} = $value;
     }
   }
+
+  annu($name, $dates);
 }
 
 @events = sort { $a->[0] <=> $b->[0] } @events;
